@@ -6,12 +6,27 @@ and SQL database
 """
 import sys
 from flask import Flask
+from flask_talisman import Talisman
+from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 from service import config
 from service.common import log_handlers
 
 # Create Flask application
 app = Flask(__name__)
 app.config.from_object(config)
+
+# Trust X-Forwarded-Proto/Host from one proxy hop (the OpenShift router),
+# so the app knows when the original client request was HTTPS.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Security: add standard security headers (X-Frame-Options, CSP, etc.).
+# HTTP->HTTPS redirect is opt-in via FORCE_HTTPS because TLS is terminated
+# at the router/ingress and the pod itself only serves plain HTTP on 8080.
+talisman = Talisman(app, force_https=config.FORCE_HTTPS)
+
+# Security: allow cross-origin requests from other microservices
+CORS(app)
 
 # Import the routes After the Flask app is created
 # pylint: disable=wrong-import-position, cyclic-import, wrong-import-order

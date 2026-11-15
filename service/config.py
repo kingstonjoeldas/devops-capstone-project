@@ -19,5 +19,9 @@ if not DATABASE_URI:
 SQLALCHEMY_DATABASE_URI = DATABASE_URI
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+# Redirect plain HTTP to HTTPS inside the app (off by default: TLS is
+# terminated by the OpenShift router / ingress in front of the pods)
+FORCE_HTTPS = os.getenv("FORCE_HTTPS", "false").lower() in ("true", "1", "yes")
+
 # Secret for session management
 SECRET_KEY = os.getenv("SECRET_KEY", "s3cr3t-key-shhhh")

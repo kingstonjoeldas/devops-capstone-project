@@ -1,8 +1,78 @@
 # devops-capstone-project
 
-it’s a customer accounts microservice with a REST API, built with TDD and deployed via CI/CD.
+[![CI Build](https://github.com/kingstonjoeldas/devops-capstone-project/actions/workflows/ci-build.yaml/badge.svg)](https://github.com/kingstonjoeldas/devops-capstone-project/actions/workflows/ci-build.yaml)
+[![Python 3.9](https://img.shields.io/badge/Python-3.9-green.svg)](https://shields.io/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## Usage
+A customer **Accounts microservice** with a REST API, built with Test Driven Development
+and delivered with CI (GitHub Actions) and CD (Tekton on OpenShift). This is the
+IBM DevOps and Software Engineering capstone project.
+
+## REST API
+
+| Method | URL | Description | Success | Errors |
+|--------|-----|-------------|---------|--------|
+| GET | `/` | Service name, version and link to `/accounts` | 200 | |
+| GET | `/health` | Health check | 200 | |
+| POST | `/accounts` | Create an account (JSON body) | 201 + `Location` header | 400, 415 |
+| GET | `/accounts` | List all accounts | 200 (empty list if none) | |
+| GET | `/accounts/{id}` | Read an account | 200 | 404 |
+| PUT | `/accounts/{id}` | Update an account (JSON body) | 200 | 400, 404, 415 |
+| DELETE | `/accounts/{id}` | Delete an account (idempotent) | 204 | |
+
+Example body:
+
+```json
+{"name": "John Doe", "email": "john@doe.com", "address": "123 Main St.", "phone_number": "555-1212"}
+```
+
+Every response carries security headers from **Flask-Talisman** (`X-Frame-Options`,
+`X-Content-Type-Options`, `Content-Security-Policy`, `Referrer-Policy`) and a CORS
+header from **Flask-Cors**. HTTP-to-HTTPS redirect is opt-in with `FORCE_HTTPS=true`,
+because TLS is terminated by the OpenShift router in front of the pods.
+
+## Running the tests
+
+```bash
+make db        # start PostgreSQL in Docker
+make lint      # flake8
+make tests     # nose with coverage (>= 95%)
+```
+
+## Running the service in Docker
+
+```bash
+docker build -t accounts:1 .
+docker run --rm -p 8080:8080 -e DATABASE_URI=postgresql://postgres:postgres@<db-host>:5432/postgres accounts:1
+curl http://localhost:8080/
+```
+
+## Deploying to OpenShift (Kubernetes)
+
+```bash
+oc create -f postgresql-ephemeral-template.json   # only if the template is not in the cluster
+oc new-app postgresql-ephemeral                    # creates the postgresql service and secret
+export IMAGE=<registry>/<namespace>/accounts:1     # registry path from the lab instructions
+docker tag accounts:1 $IMAGE && docker push $IMAGE
+sed "s|IMAGE_NAME_HERE|$IMAGE|g" deploy/deployment.yaml | oc apply -f -
+oc apply -f deploy/service.yaml
+oc expose service accounts
+oc get all -l app=accounts
+```
+
+## CD pipeline (Tekton)
+
+```bash
+oc apply -f tekton/pvc.yaml
+oc apply -f tekton/tasks.yaml                       # cleanup, nose
+tkn hub install task git-clone
+tkn hub install task flake8
+oc apply -f tekton/pipeline.yaml
+tkn pipeline start cd-pipeline   -p repo-url="https://github.com/kingstonjoeldas/devops-capstone-project.git"   -p branch=main   -p build-image=image-registry.openshift-image-registry.svc:5000/$SN_ICR_NAMESPACE/accounts:1   -w name=pipeline-workspace,claimName=pipelinerun-pvc   -s pipeline --showlog
+tkn pipelinerun logs --last > pipelinerun.txt
+```
+
+Pipeline: `init` (cleanup) -> `clone` -> `lint` + `tests` (in parallel) -> `build` (buildah) -> `deploy` (oc apply).
 
 ## Development Environment
 
@@ -57,12 +127,16 @@ You can use the `docker ps` command to make sure that postgres is up and running
 The code for the microservice is contained in the `service` package. All of the test are in the `tests` folder. The code follows the **Model-View-Controller** pattern with all of the database code and business logic in the model (`models.py`), and all of the RESTful routing on the controller (`routes.py`).
 
 ```text
+├── deploy          <- Kubernetes manifests
+├── docs            <- user stories / backlog
 ├── service         <- microservice package
 │   ├── common/     <- common log and error handlers
 │   ├── config.py   <- Flask configuration object
 │   ├── models.py   <- code for the persistent model
 │   └── routes.py   <- code for the REST API routes
 ├── setup.cfg       <- tools setup config
+├── tekton          <- Tekton tasks, pipeline and PVC
+├── Dockerfile      <- container image
 └── tests                       <- folder for all of the tests
     ├── factories.py            <- test factories
     ├── test_cli_commands.py    <- CLI tests
